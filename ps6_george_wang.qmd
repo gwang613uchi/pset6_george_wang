@@ -1,0 +1,692 @@
+---
+title: "Problem Set 6 - Waze Shiny Dashboard"
+author: "George Wang"
+date: today
+format: 
+  pdf:
+    include-in-header: 
+       text: |
+         \usepackage{fvextra}
+         \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+         \usepackage{sectsty}
+         \allsectionsfont{\small} 
+         \renewcommand{\baselinestretch}{0.9} 
+         \renewcommand\normalsize{\fontsize{8}{10}\selectfont}
+include-before-body:
+  text: |
+    \RecustomVerbatimEnvironment{verbatim}{Verbatim}{
+      showspaces = false,
+      showtabs = false,
+      breaksymbolleft={},
+      breaklines
+    }
+---
+
+1. **ps6:** Due Sat 23rd at 5:00PM Central. Worth 100 points (80 points from questions, 10 points for correct submission and 10 points for code style) + 10 extra credit. 
+
+We use (`*`) to indicate a problem that we think might be time consuming. 
+
+# Steps to submit (10 points on PS6) {-}
+
+1. "This submission is my work alone and complies with the 30538 integrity
+policy." Add your initials to indicate your agreement: **GW**
+2. "I have uploaded the names of anyone I worked with on the problem set **[here](https://docs.google.com/forms/d/185usrCREQaUbvAXpWhChkjghdGgmAZXA3lPWpXLLsts/edit)**"  **GW** (2 point)
+3. Late coins used this pset: **3** Late coins left after submission: **1**
+
+4. Before starting the problem set, make sure to read and agree to the terms of data usage for the Waze data [here](https://canvas.uchicago.edu/courses/59054/quizzes/130617).
+
+5. Knit your `ps6.qmd` as a pdf document and name it `ps6.pdf`.
+6. Submit your `ps6.qmd`, `ps6.pdf`, `requirements.txt`, and all created folders (we will create three Shiny apps so you will have at least three additional folders) to the gradescope repo assignment (5 points).
+7. Submit `ps6.pdf` and also link your Github repo via Gradescope (5 points)
+8. Tag your submission in Gradescope. For the Code Style part (10 points) please tag the whole correspondingsection for the code style rubric.
+
+*Notes: see the [Quarto documentation (link)](https://quarto.org/docs/authoring/figures.html) for directions on inserting images into your knitted document.*
+
+```{python} 
+#| echo: false
+
+# Import required packages.
+import pandas as pd
+import altair as alt 
+import geopandas as gpd
+from datetime import date
+import numpy as np
+alt.data_transformers.disable_max_rows() 
+import re
+import json
+import os
+import requests
+
+alt.renderers.enable("png")
+pd.options.mode.chained_assignment = None
+```
+
+# Background {-}
+
+## Data Download and Exploration (20 points){-} 
+
+1. 
+
+```{python}
+# Read in CSV file
+df = pd.read_csv('waze_data/waze_data_sample.csv')
+
+# Check data type
+data_types = df.dtypes
+
+# Ignore columns
+ignore_columns = ['ts', 'geo', 'geoWKT']
+
+# Altair data type mapping
+altair_types = {
+    'int64': 'Quantitative',
+    'float64': 'Quantitative',
+    'object': 'Nominal',
+    'bool': 'Nominal',
+    'datetime64[ns]': 'Temporal'
+}
+
+# Report data types
+for column in df.columns:
+  if column not in ignore_columns:
+    if 'Unnamed' in column:
+      print(f"{column}: Nominal")
+    else:
+      print(f"{column}: {altair_types[str(data_types[column])]}")
+```
+
+2. 
+
+```{python}
+# Read the wze data in geo dataframe
+df_full = pd.read_csv('waze_data/waze_data.csv')
+
+# Check for NULL values
+null_counts = df_full.isnull().sum()
+non_null_counts = df_full.notnull().sum()
+
+# Create a DataFrame for visualization
+null_data = pd.DataFrame({
+    'variable': df_full.columns,
+    'null': null_counts,
+    'non_null': non_null_counts
+})
+
+# Melt the DataFrame for Altair
+null_data_melted = null_data.melt(id_vars='variable', value_vars=['null', 'non_null'], var_name='status', value_name='count')
+
+# Create the stacked bar chart
+chart = alt.Chart(null_data_melted).mark_bar().encode(
+    x='variable',
+    y='count',
+    color='status'
+).properties(
+    title='NULL vs Non-NULL Counts for Each Variable',
+    width=200
+)
+
+chart.display()
+
+# Print variables with NULL values and the variable with the highest share of missing observations
+variables_with_nulls = null_counts[null_counts > 0]
+print("Variables with NULL values:")
+print(variables_with_nulls)
+
+variable_with_highest_null_share = (null_counts / len(df_full)).idxmax()
+print(f"Variable with the highest share of missing observations: {variable_with_highest_null_share}")
+```
+
+3. 
+```{python}
+# Inspect the variable types and subtypes
+data_types = df_full.dtypes
+print(data_types)
+
+# Create a concise crosswalk table
+crosswalk = pd.DataFrame({
+    'original_name': df_full.columns,
+    'clean_name': [
+        'city', 'confidence', 'thumbs_up', 'street', 'unique_id', 'country_id', 'alert_type','alert_subtype', 'road_type', 'reliability', 'alert_direction', 'report_rating', 'timestamp', 'geo', 'geoWKT'
+    ],
+    'description': [
+        'City and state name',
+        'Confidence in alert (user reactions)',
+        'Number of thumbs up',
+        'Street name',
+        'Unique system ID',
+        'Country code (ISO 3166-1)',
+        'Alert type',
+        'Alert sub type',
+        'Road type',
+        'Confidence in alert (user input)',
+        'Alert direction (0-359 degrees)',
+        'User rank (1-6)',
+        'Timestamp of alert',
+        'Geography of alert',
+        'Geography of alert (WKT format)'
+    ]
+})
+
+# Print the crosswalk table
+print(crosswalk)
+```
+
+```{python}
+# Print unique values for 'type' and 'subtype'
+unique_types = df_full['type'].unique()
+unique_subtypes = df_full['subtype'].unique()
+
+print("Unique values for 'type':")
+print(unique_types)
+
+print("\nUnique values for 'subtype':")
+print(unique_subtypes)
+
+# Count types with NA subtypes
+na_subtype_count = df_full[df_full['subtype'].isna()]['type'].nunique()
+print(f"\nNumber of types with a subtype that is NA: {na_subtype_count}")
+
+# Identify types with subtypes that have enough information to consider sub-subtypes
+type_subtype_combinations = df_full.groupby('type')['subtype'].nunique()
+print(type_subtype_combinations)
+```
+HAZARD is has 19 subtypes that have enough information to consider that they could have
+sub-subtypes. For other vairables, they do not contain much complicated information that necessitates sub-categories.
+
+```{python}
+# Replace NA with 'Unclassified'
+df_full['subtype'] = df_full['subtype'].fillna('Unclassified')
+
+# Create a mapping for clean and readable names
+type_mapping = {
+    'ACCIDENT': 'Accident',
+    'JAM': 'Traffic Jam',
+    'HAZARD': 'Hazard',
+    'ROAD_CLOSED': 'Road Closed',
+    'CONSTRUCTION': 'Construction',
+    'EVENT': 'Event',
+    'CHIT_CHAT': 'Chit Chat'
+}
+
+subtype_mapping = {
+    'ACCIDENT_MAJOR': ('Major', 'Unclassified'),
+    'ACCIDENT_MINOR': ('Minor', 'Unclassified'),
+    'JAM_HEAVY_TRAFFIC': ('Heavy Traffic', 'Unclassified'),
+    'JAM_MODERATE_TRAFFIC': ('Moderate Traffic', 'Unclassified'),
+    'JAM_STAND_STILL_TRAFFIC': ('Stand Still Traffic', 'Unclassified'),
+    'HAZARD_ON_ROAD': ('On Road', 'Unclassified'),
+    'HAZARD_ON_ROAD_CAR_STOPPED': ('On Road', 'Car Stopped'),
+    'HAZARD_ON_ROAD_CONSTRUCTION': ('On Road', 'Construction'),
+    'HAZARD_ON_ROAD_EMERGENCY_VEHICLE': ('On Road', 'Emergency Vehicle'),
+    'HAZARD_ON_ROAD_ICE': ('On Road', 'Ice'),
+    'HAZARD_ON_ROAD_OBJECT': ('On Road', 'Object'),
+    'HAZARD_ON_ROAD_POT_HOLE': ('On Road', 'Pot Hole'),
+    'HAZARD_ON_ROAD_TRAFFIC_LIGHT_FAULT': ('On Road', 'Traffic Light Fault'),
+    'HAZARD_ON_SHOULDER': ('On Shoulder', 'Unclassified'),
+    'HAZARD_ON_SHOULDER_CAR_STOPPED': ('On Shoulder', 'Car Stopped'),
+    'HAZARD_ON_SHOULDER_ANIMALS': ('On Shoulder', 'Animals'),
+    'HAZARD_ON_SHOULDER_MISSING_SIGN': ('On Shoulder', 'Missing Sign'),
+    'HAZARD_WEATHER': ('Weather', 'Unclassified'),
+    'HAZARD_WEATHER_FLOOD': ('Weather', 'Flood'),
+    'HAZARD_WEATHER_FOG': ('Weather', 'Fog'),
+    'HAZARD_WEATHER_HEAVY_SNOW': ('Weather', 'Heavy Snow'),
+    'HAZARD_WEATHER_HAIL': ('Weather', 'Hail'),
+    'ROAD_CLOSED_EVENT': ('Event', 'Unclassified'),
+    'ROAD_CLOSED_CONSTRUCTION': ('Construction', 'Unclassified'),
+    'ROAD_CLOSED_HAZARD': ('Hazard', 'Unclassified'),
+    'HAZARD_ON_ROAD_LANE_CLOSED': ('On Road', 'Lane Closed'),
+    'HAZARD_ON_ROAD_ROAD_KILL': ('On Road', 'Road Kill'),
+    'JAM_LIGHT_TRAFFIC': ('Light Traffic', 'Unclassified'),
+    'Unclassified': ('Unclassified', 'Unclassified')
+}
+
+# Get unique combinations of type and subtype
+unique_combinations = df_full[['type', 'subtype']].drop_duplicates()
+
+# Create the hierarchical list
+hierarchy = {}
+
+for t in unique_combinations['type'].unique():
+    clean_type = type_mapping.get(t, t)
+    subtypes = unique_combinations[unique_combinations['type'] == t]['subtype'].unique()
+    clean_subtypes = [subtype_mapping.get(st, (st, '')) for st in subtypes]
+    hierarchy[clean_type] = clean_subtypes
+
+# Print the hierarchical list
+print("Hierarchical List:")
+for t, subtypes in hierarchy.items():
+    print(f"- {t}")
+    subcategory_dict = {}
+    for st, subsub in subtypes:
+        if subsub:
+            if st not in subcategory_dict:
+                subcategory_dict[st] = []
+            subcategory_dict[st].append(subsub)
+        else:
+            print(f"  - {st}")
+    for st, subsubs in subcategory_dict.items():
+        print(f"  - {st}")
+        for subsub in subsubs:
+            print(f"    - {subsub}")
+
+# Calculate the percentage distribution of 'Unclassified' subtypes
+unclassified_percentage = (df_full['subtype'] == 'Unclassified').mean() * 100
+
+print(f"Percentage distribution of 'Unclassified' subtypes: {unclassified_percentage:.2f}%")
+```
+We should keep the NA subtypes because df_full have 12.35% of the whole dataset, which is a significant portion. Keeping them can make our result more representative and comprehensive.
+
+4. 
+
+1. 
+```{python}
+# Define the crosswalk DataFrame with the specified columns
+crosswalk_df = pd.DataFrame(columns=['type', 'subtype', 'updated_type', 'updated_subtype', 'updated_subsubtype'])
+
+# Print the empty crosswalk DataFrame
+print(crosswalk_df.head())
+```
+
+2. 
+
+```{python}
+# Get unique combinations of type and subtype
+unique_combinations = df_full[['type', 'subtype']].drop_duplicates()
+
+# Create the crosswalk DataFrame
+crosswalk_data = []
+
+for _, row in unique_combinations.iterrows():
+    original_type = row['type']
+    original_subtype = row['subtype']
+    updated_type = type_mapping.get(original_type, original_type)
+    updated_subtype, updated_subsubtype = subtype_mapping.get(original_subtype, (original_subtype, ''))
+    crosswalk_data.append([original_type, original_subtype, updated_type, updated_subtype, updated_subsubtype])
+
+crosswalk_df = pd.DataFrame(crosswalk_data, columns=['type', 'subtype', 'updated_type', 'updated_subtype', 'updated_subsubtype'])
+
+# Print the crosswalk DataFrame
+print(crosswalk_df)
+```
+
+3. 
+
+```{python}
+# Merge the crosswalk with the original data
+merged_df = pd.merge(df_full, crosswalk_df, on=['type', 'subtype'])
+
+# Save the merged DataFrame to a CSV file
+merged_df.to_csv("merged_data.csv", index=False)
+
+# Count the rows for Accident - Unclassified
+accident_unclassified_count = merged_df[(merged_df['updated_type'] == 'Accident') & (merged_df['updated_subtype'] == 'Unclassified')].shape[0]
+
+print(f"Number of rows for Accident - Unclassified: {accident_unclassified_count}")
+```
+
+4. 
+
+```{python}
+# Check if the values in type and subtype are the same in both datasets
+type_check = (merged_df['type'] == merged_df['updated_type']).all()
+subtype_check = (merged_df['subtype'] == merged_df['updated_subtype']).all()
+
+print(f"Do the 'type' values match in both datasets? {'Yes' if type_check else 'No'}")
+print(f"Do the 'subtype' values match in both datasets? {'Yes' if subtype_check else 'No'}")
+```
+
+
+# App #1: Top Location by Alert Type Dashboard (30 points){-}
+
+1. 
+
+a. 
+```{python}
+# Define a function to extract each of them
+def extract_coordinates(geo):
+    pattern = r"POINT\(([-+]?\d*\.\d+|\d+) ([-+]?\d*\.\d+|\d+)\)"
+    match = re.match(pattern, geo)
+    if match:
+        return float(match.group(2)), float(match.group(1))  # latitude, longitude
+    return None, None
+
+# Extract coordinates into a new DataFrame
+coordinates = merged_df["geo"].apply(extract_coordinates)
+
+coordinates_df = pd.DataFrame(coordinates.tolist(), columns=["latitude", "longitude"])
+
+# Display the new DataFrame
+print(coordinates_df)
+```
+
+b. 
+```{python}
+# Bin the latitude and longitude variables
+coordinates_df['latitude_bin'] = coordinates_df['latitude'].apply(lambda x: round(x, 2))
+coordinates_df['longitude_bin'] = coordinates_df['longitude'].apply(lambda x: round(x, 2))
+
+# Combine the binned latitude and longitude into a single column
+coordinates_df['lat_long_bin'] = list(zip(coordinates_df['latitude_bin'], coordinates_df['longitude_bin']))
+merged_df['lat_long_bin'] = list(zip(coordinates_df['latitude_bin'], coordinates_df['longitude_bin']))
+
+# Save the merged DataFrame to a CSV file
+coordinates_df.to_csv("coordinates_df.csv", index=False)
+
+# Find the binned latitude-longitude combination with the greatest number of observations
+most_common_bin = coordinates_df['lat_long_bin'].value_counts().idxmax()
+most_common_bin_count = coordinates_df['lat_long_bin'].value_counts().max()
+
+print(f"The binned latitude-longitude combination with the greatest number of observations is: {most_common_bin}")
+print(f"Number of observations: {most_common_bin_count}")
+```
+
+c. 
+```{python}
+# Filter the data for a chosen type and subtype
+chosen_type = 'Accident'
+chosen_subtype = 'Unclassified'
+filtered_df = merged_df[(merged_df['updated_type'] == chosen_type) & (merged_df['updated_subtype'] == chosen_subtype)]
+
+# Aggregate the data to find the top 10 
+top_alerts = coordinates_df.loc[filtered_df.index].groupby('lat_long_bin').size().reset_index(name='count')
+top_10_alerts = top_alerts.nlargest(10, 'count')
+
+# Create the directory
+os.makedirs('top_alerts_map', exist_ok=True)
+
+# Save the DataFrame as a CSV file
+top_10_alerts.to_csv('top_alerts_map/top_alerts_map.csv', index=False)
+
+# Display the level of aggregation and the number of rows
+level_of_aggregation = 'latitude-longitude bin'
+number_of_rows = top_10_alerts.shape[0]
+
+print(f"Level of aggregation: {level_of_aggregation}")
+print(f"Number of rows: {number_of_rows}")
+print(top_10_alerts)
+```
+
+d. 
+```{python}
+# Filter the data for 'Jam - Heavy Traffic'
+chosen_type = 'Traffic Jam'
+chosen_subtype = 'Heavy Traffic'
+filtered_df = merged_df[(merged_df['updated_type'] == chosen_type) & (merged_df['updated_subtype'] == chosen_subtype)]
+
+# Aggregate the data to find the top 10 
+top_alerts = coordinates_df.loc[filtered_df.index].groupby('lat_long_bin').size().reset_index(name='count')
+top_10_alerts = top_alerts.nlargest(10, 'count')
+
+# Extract latitude and longitude from the bins
+top_10_alerts[['latitude_bin', 'longitude_bin']] = pd.DataFrame(top_10_alerts['lat_long_bin'].tolist(), index=top_10_alerts.index)
+
+# Create the scatter plot
+scatter_plot = alt.Chart(top_10_alerts).mark_circle().encode(
+    x=alt.X('longitude_bin:Q', title='Longitude', scale=alt.Scale(domain=[-87.95, -87.5])),
+    y=alt.Y('latitude_bin:Q', title='Latitude', scale=alt.Scale(domain=[41.6, 42.1])),
+    size=alt.Size('count:Q', title='Number of Alerts'),
+    tooltip=['latitude_bin', 'longitude_bin', 'count']
+).properties(
+    title='Top 10 Latitude-Longitude Bins with Highest Number of "Jam - Heavy Traffic" Alerts',
+    width=200,
+    height=150
+)
+
+scatter_plot.display()
+```
+
+3. 
+    
+a. 
+
+```{python}
+# URL of the GeoJSON file
+url = "https://data.cityofchicago.org/resource/igwz-8jzy.geojson"
+
+# Send a GET request to download the file
+response = requests.get(url)
+
+# Save the GeoJSON file
+geojson_path = "./top_alerts_map/chicago-boundaries.geojson"
+with open(geojson_path, 'wb') as f:
+    f.write(response.content)
+
+print(f"GeoJSON file downloaded and saved to {geojson_path}")
+```
+    
+
+b. 
+```{python}
+# Locate the directory
+file_path = "./top_alerts_map/chicago-boundaries.geojson"
+
+# Open and load the geojson
+with open(file_path) as f:
+    chicago_geojson = json.load(f)
+
+geo_data = alt.Data(values=chicago_geojson["features"])
+```
+
+4. 
+
+```{python}
+# Create the base map using the GeoJSON data
+base_map = alt.Chart(geo_data).mark_geoshape(
+    fill='lightgray',
+    stroke='black'
+).encode(
+    tooltip=['properties.name:N']
+).project(
+    type='equirectangular'
+).properties(
+    width=200,
+    height=150
+)
+
+# Layer the scatter plot on top of the base map
+combined_plot = base_map + scatter_plot
+
+# Display the combined plot
+combined_plot.display()
+```
+
+5. 
+
+a. 
+
+![](pic/5a.png){fig-align="left" width="45%"}
+
+b. 
+
+![](pic/app1_5b.png){fig-align="left" width="45%"}
+
+c. 
+
+![](pic/app1_5c.png){fig-align="left" width="45%"}
+The most common locations for road closures due to events are represented by the largest blue circles, indicating the areas with the highest number of alerts. Central and North-Central Chicago has the highest density of road closure alerts due to events. South-Central Chicago also has smaller clusters scattered across other regions. This suggests that road closures for events are concentrated in areas with higher activity, likely due to event venues or major roads in these regions.
+
+d. 
+
+![](pic/app1_5d.png){fig-align="left" width="45%"}
+It can answer where do major accident usually occur. Based on the provided visualization, major accidents are most commonly reported in South-Central Chicago, particularly along major traffic corridors (very likely due to high way traffic and complicated road signs). The clusters indicate hotspots that might benefit from additional traffic monitoring.
+
+e. 
+To make the dashboard more insightful, we can include a column for the hour of the day or day of the week. This will help visualize patterns of incidents over time and identify peak periods for different types of alerts.
+
+# App #2: Top Location by Alert Type and Hour Dashboard (20 points) {-}
+
+1. 
+
+a. 
+It would not be a good idea to collapse the dataset solely by ts. Timestamps are typically very granular, often down to the second. Collapsing the dataset by such a granular column will result inmany unique groups, making it difficult to analyze the data effectively. Thus, if the goal is to analyze patterns over time, it would be more useful to aggregate the data into larger time intervals, such as hours, allowing for more meaningful insights into trends.
+
+    
+b. 
+```{python}
+# Parse the 'ts' column to datetime and extract the hour
+merged_df['hour'] = pd.to_datetime(merged_df['ts']).dt.strftime('%H:00')
+
+# Create the directory 
+os.makedirs('top_alerts_map_byhour', exist_ok=True)
+
+# Step 3: Collapse the dataset
+# Group by hour, type, subtype, and location to calculate the count of alerts
+collapsed_df = merged_df.groupby(['hour', 'updated_type', 'updated_subtype', 'lat_long_bin']).size().reset_index(name='count')
+
+# Save the collapsed dataset as a CSV file
+collapsed_df.to_csv('top_alerts_map_byhour/top_alerts_map_byhour.csv', index=False)
+
+# Print
+number_of_rows = collapsed_df.shape[0]
+print(f"Number of rows in the collapsed dataset: {number_of_rows}")
+```
+
+c.
+```{python}
+# Define the hours to plot
+hours_to_plot = ['00:00', '12:00', '18:00']
+
+# Filter the data for 'Jam - Heavy Traffic' and the specified hours
+chosen_type_subtype = 'Traffic Jam - Heavy Traffic'
+chosen_type, chosen_subtype = chosen_type_subtype.split(' - ')
+
+filtered_df = collapsed_df[(collapsed_df['updated_type'] == chosen_type) & (collapsed_df['updated_subtype'] == chosen_subtype) & (collapsed_df['hour'].isin(hours_to_plot))]
+print(filtered_df)
+# Create individual plots for each hour
+for hour in hours_to_plot:
+    hour_df = filtered_df[filtered_df['hour'] == hour]
+    
+    # Extract latitude and longitude from the bins and select top 10
+    hour_df[['latitude_bin', 'longitude_bin']] = pd.DataFrame(hour_df['lat_long_bin'].tolist(), index=hour_df.index, columns=['latitude_bin', 'longitude_bin'])
+    top_10_bins = hour_df.nlargest(10, 'count')
+
+    
+    # Create the scatter plot
+    scatter_plot = alt.Chart(top_10_bins).mark_circle().encode(
+        x=alt.X('longitude_bin:Q', title='Longitude', scale=alt.Scale(domain=[-87.95, -87.5])),
+        y=alt.Y('latitude_bin:Q', title='Latitude', scale=alt.Scale(domain=[41.6, 42.1])),
+        size=alt.Size('count:Q', title='Number of Alerts'),
+        tooltip=['latitude_bin', 'longitude_bin', 'count']
+    ).properties(
+        title=f'Top 10 Bins of "Jam - Heavy Traffic" Alerts at {hour}',
+        width=200,
+        height=150
+    )
+    
+    # Layer the scatter plot on top of the base map
+    combined_plot = base_map + scatter_plot
+    
+    # Display the combined plot
+    combined_plot.display()
+```    
+
+2.
+
+a. 
+
+![](pic/app2_2a.png){fig-align="left" width="45%"}
+
+b. 
+
+![](pic/app2a_2b_1.png){fig-align="left" width="45%"}
+![](pic/app2a_2b_2.png){fig-align="left" width="45%"}
+![](pic/app2a_2b_3.png){fig-align="left" width="45%"}
+
+c. 
+
+![](pic/app2a_2b_3.png){fig-align="left" width="45%"}
+
+![](pic/app2a_2b_3.png){fig-align="left" width="45%"}
+
+Road construction is done more during night hours than morning hours.
+
+# App #3: Top Location by Alert Type and Hour Dashboard (20 points){-}
+
+1. 
+
+a. 
+Collapsing the dataset by a range of hours can be a useful approach. First, it reduces the size of the dataset, which makes data processing and visualization in the Shiny app more efficient. Additionally, it helps identify broader patterns, such as traffic jams or road hazards that occur more frequently during specific time blocks like the morning hours. This approach also simplifies user interaction by allowing users to focus on larger time intervals rather than examining data for each hour individually, making visualizations clearer by reducing noise.
+
+b. 
+```{python}
+# Define the range of hours
+hours_range = ['06:00', '07:00', '08:00', '09:00']
+
+# Filter the dataset for 'Jam - Heavy Traffic' and the specified hours
+chosen_type_subtype = 'Traffic Jam - Heavy Traffic'
+chosen_type, chosen_subtype = chosen_type_subtype.split(' - ')
+
+filtered_df = collapsed_df[
+    (collapsed_df['updated_type'] == chosen_type) & 
+    (collapsed_df['updated_subtype'] == chosen_subtype) & 
+    (collapsed_df['hour'].isin(hours_range))
+]
+
+# Aggregate counts across the hour range
+aggregated_df = filtered_df.groupby('lat_long_bin').agg({'count': 'sum'}).reset_index()
+
+# Select the top 10 locations
+top_10_bins = aggregated_df.nlargest(10, 'count')
+
+# Extract latitude and longitude
+top_10_bins[['latitude_bin', 'longitude_bin']] = pd.DataFrame(
+    top_10_bins['lat_long_bin'].tolist(),
+    index=top_10_bins.index,
+    columns=['latitude_bin', 'longitude_bin']
+)
+
+# Create the scatter plot
+scatter_plot = alt.Chart(top_10_bins).mark_circle().encode(
+    x=alt.X('longitude_bin:Q', title='Longitude', scale=alt.Scale(domain=[-87.95, -87.5])),
+    y=alt.Y('latitude_bin:Q', title='Latitude', scale=alt.Scale(domain=[41.6, 42.1])),
+    size=alt.Size('count:Q', title='Number of Alerts'),
+    tooltip=['latitude_bin', 'longitude_bin', 'count']
+).properties(
+    title='Top 10 Locations for "Jam - Heavy Traffic" (6 AM - 9 AM)',
+    width=200,
+    height=150
+)
+
+# Layer the scatter plot on top of the base map
+combined_plot = base_map + scatter_plot
+
+# Display
+combined_plot.display()
+```
+
+2. 
+
+a. 
+
+![](pic/app3_2a.png){fig-align="left" width="45%"}
+
+b. 
+
+![](pic/app3_2b.png){fig-align="left" width="45%"}
+
+3. 
+
+a. 
+
+![](pic/app3_3a.png){fig-align="left" width="45%"}
+The possible values for the input.switch_button are True and False. When the switch button is toggled on, the value will be True, and when it is toggled off, the value will be False. This allows the app to conditionally display single hourslider or the hour range slider.   
+
+b. 
+
+![](pic/app3_3b_1.png){fig-align="left" width="45%"}
+
+![](pic/app3_3b_2.png){fig-align="left" width="45%"}
+
+c.
+ 
+![](pic/app3_3c_1.png){fig-align="left" width="45%"}
+
+![](pic/app3_3c_2.png){fig-align="left" width="45%"}
+
+d.
+
+To achieve this plot, the dataset needs to include a new column categorizing hours into specific time periods, such as "Morning" (6 AM–12 PM) and "Afternoon" (12 PM–6 PM).
+
+Next, the plot should use color encoding in Altair to visually differentiate time periods, assigning distinct colors (red for Morning and blue for Afternoon) to make patterns more obvious. 
+
+Additionally, the data should be aggregated for each time period, summing up counts with specific time period. The aggregated results can then be combined into a single dataset, allowing both periods to be displayed simultaneously on the map.
