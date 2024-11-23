@@ -137,6 +137,8 @@ print(f"Variable with the highest share of missing observations: {variable_with_
 ```
 
 3. 
+
+a.
 ```{python}
 # Inspect the variable types and subtypes
 data_types = df_full.dtypes
@@ -190,9 +192,11 @@ print(f"\nNumber of types with a subtype that is NA: {na_subtype_count}")
 type_subtype_combinations = df_full.groupby('type')['subtype'].nunique()
 print(type_subtype_combinations)
 ```
+
 HAZARD is has 19 subtypes that have enough information to consider that they could have
 sub-subtypes. For other vairables, they do not contain much complicated information that necessitates sub-categories.
 
+b.
 ```{python}
 # Replace NA with 'Unclassified'
 df_full['subtype'] = df_full['subtype'].fillna('Unclassified')
@@ -268,6 +272,12 @@ for t, subtypes in hierarchy.items():
         print(f"  - {st}")
         for subsub in subsubs:
             print(f"    - {subsub}")
+```
+
+c.
+```{python}
+# The mapping of unclassified variable has been updated above (please refer to the last mapping process)
+subtype_mapping
 
 # Calculate the percentage distribution of 'Unclassified' subtypes
 unclassified_percentage = (df_full['subtype'] == 'Unclassified').mean() * 100
@@ -275,19 +285,17 @@ unclassified_percentage = (df_full['subtype'] == 'Unclassified').mean() * 100
 print(f"Percentage distribution of 'Unclassified' subtypes: {unclassified_percentage:.2f}%")
 ```
 We should keep the NA subtypes because df_full have 12.35% of the whole dataset, which is a significant portion. Keeping them can make our result more representative and comprehensive.
+```
 
 4. 
 
-1. 
+a. 
 ```{python}
 # Define the crosswalk DataFrame with the specified columns
 crosswalk_df = pd.DataFrame(columns=['type', 'subtype', 'updated_type', 'updated_subtype', 'updated_subsubtype'])
-
-# Print the empty crosswalk DataFrame
-print(crosswalk_df.head())
 ```
 
-2. 
+b. 
 
 ```{python}
 # Get unique combinations of type and subtype
@@ -309,7 +317,7 @@ crosswalk_df = pd.DataFrame(crosswalk_data, columns=['type', 'subtype', 'updated
 print(crosswalk_df)
 ```
 
-3. 
+c. 
 
 ```{python}
 # Merge the crosswalk with the original data
@@ -324,7 +332,7 @@ accident_unclassified_count = merged_df[(merged_df['updated_type'] == 'Accident'
 print(f"Number of rows for Accident - Unclassified: {accident_unclassified_count}")
 ```
 
-4. 
+d. 
 
 ```{python}
 # Check if the values in type and subtype are the same in both datasets
@@ -399,14 +407,15 @@ top_10_alerts.to_csv('top_alerts_map/top_alerts_map.csv', index=False)
 
 # Display the level of aggregation and the number of rows
 level_of_aggregation = 'latitude-longitude bin'
-number_of_rows = top_10_alerts.shape[0]
+number_of_rows = top_alerts.shape[0]
 
 print(f"Level of aggregation: {level_of_aggregation}")
 print(f"Number of rows: {number_of_rows}")
 print(top_10_alerts)
 ```
 
-d. 
+2.
+
 ```{python}
 # Filter the data for 'Jam - Heavy Traffic'
 chosen_type = 'Traffic Jam'
